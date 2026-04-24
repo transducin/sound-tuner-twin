@@ -1,0 +1,2337 @@
+# ================================================================
+# OBA Audio v1 — Cell 1
+# Global Imports + Time Grid Initialization
+# ================================================================
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ---- Global random seed for reproducibility ----
+rng = np.random.default_rng(42)
+
+# ---- Audio sampling settings ----
+sample_rate = 16000      # 16 kHz standard (可根据需求调整)
+duration = 1.0           # 1-second waveform
+n_samples = int(sample_rate * duration)
+
+# ---- Time axis ----
+t = np.linspace(0, duration, n_samples, endpoint=False)
+
+print("Cell 1 OK — Global imports + time grid initialized.")
+print("Sample rate:", sample_rate, "Hz")
+print("Total samples:", n_samples)
+print("Time axis shape:", t.shape)
+
+Cell 1 OK — Global imports + time grid initialized.
+Sample rate: 16000 Hz
+Total samples: 16000
+Time axis shape: (16000,)
+
+# ================================================================
+# OBA Audio v1 — Cell 2
+# Waveform Generators (Pure Tones / Noise / Multi-tone Mixing)
+# ================================================================
+
+import numpy as np
+
+# 使用 Cell 1 中的 rng, t, sample_rate
+
+# ------------------------------------------------
+# (1) Pure Tone Generator (对应 Gaussian Spectrum)
+# ------------------------------------------------
+def make_pure_tone(freq, amplitude=0.8, phase=0.0):
+    """
+    生成纯正弦波（乐音）:
+    freq      : 频率 (Hz)
+    amplitude : 振幅 0~1
+    phase     : 初相 (rad)
+    """
+    return amplitude * np.sin(2 * np.pi * freq * t + phase)
+
+
+# ------------------------------------------------
+# (2) Noise Generators (White / Pink)
+# ------------------------------------------------
+def make_white_noise(amplitude=0.5):
+    """
+    白噪音：均匀频谱
+    """
+    return amplitude * rng.normal(0, 1, size=len(t))
+
+def make_pink_noise(amplitude=0.5):
+    """
+    粉红噪音：1/f 频谱
+    简单实现：对白噪音进行累积滤波
+    """
+    white = rng.normal(0, 1, size=len(t))
+    pink = np.cumsum(white)
+    pink = pink / np.max(np.abs(pink) + 1e-12)
+    return amplitude * pink
+
+
+# ------------------------------------------------
+# (3) Multi-tone Complex Stimulus
+#     （对应 Two-Level Mixing）
+# ------------------------------------------------
+def make_complex_tone(frequencies, amplitudes=None):
+    """
+    多音混合：将多个纯音叠加
+    frequencies: list of freq in Hz
+    amplitudes : optional list of amplitudes
+    """
+    if amplitudes is None:
+        amplitudes = np.ones(len(frequencies)) * 0.6
+    
+    wave = np.zeros(len(t))
+    for f, a in zip(frequencies, amplitudes):
+        wave += make_pure_tone(f, amplitude=a)
+    
+    # normalize
+    wave = wave / (np.max(np.abs(wave)) + 1e-12)
+    return wave
+
+
+# ------------------------------------------------
+# (4) Unified stimulus generator
+# ------------------------------------------------
+def make_audio_stimulus(stim_type="pure", **kwargs):
+    """
+    统一接口：
+    stim_type ∈ {"pure", "white", "pink", "complex"}
+
+    pure:   make_pure_tone(freq)
+    white:  white noise
+    pink:   pink noise
+    complex: multiple tones
+    """
+    if stim_type == "pure":
+        return make_pure_tone(kwargs.get("freq", 440))
+    elif stim_type == "white":
+        return make_white_noise(kwargs.get("amplitude", 0.5))
+    elif stim_type == "pink":
+        return make_pink_noise(kwargs.get("amplitude", 0.5))
+    elif stim_type == "complex":
+        return make_complex_tone(
+            kwargs.get("frequencies", [440, 660]),
+            kwargs.get("amplitudes", [0.7, 0.5])
+        )
+    else:
+        raise ValueError("Unknown stim_type.")
+
+
+print("Cell 2 OK — Audio waveform generators ready.")
+
+
+# ------------------------------------------------
+# Quick Test (可选)
+# ------------------------------------------------
+test_wave = make_audio_stimulus("pure", freq=440)
+print("Test waveform shape:", test_wave.shape)
+print("min/max:", test_wave.min(), test_wave.max())
+
+Cell 2 OK — Audio waveform generators ready.
+Test waveform shape: (16000,)
+min/max: -0.8 0.8
+
+# ================================================================
+# OBA Audio v1.5 — Cell 3 (5-Cluster Receptor Bank)
+# 完整替换你 v1 的 Cell 3
+# ================================================================
+import numpy as np
+
+# ---------- 使用 Cell 1 的全局参数 ----------
+# t, sample_rate 已在 Cell 1 中定义
+# rng 已全局定义
+
+# ------------------------------------------------
+# (1) Frequency Grid（与你 v1 完全一致）
+# ------------------------------------------------
+freqs = np.fft.rfftfreq(len(t), d=1.0/sample_rate)
+
+# ------------------------------------------------
+# (2) Gaussian frequency sensitivity（与你 v1 完全一致）
+# ------------------------------------------------
+def gaussian_freq_sensitivity(center_hz, width_hz=150):
+    """
+    与 v1 完全相同的高斯敏感度函数
+    center_hz : 中心频率
+    width_hz  : 带宽
+    返回：len(freqs) 的敏感度向量
+    """
+    sigma = width_hz / 2.355  # convert FWHM → sigma
+    sens = np.exp(-0.5 * ((freqs - center_hz) / sigma)**2)
+    return sens / (sens.max() + 1e-12)
+
+# ------------------------------------------------
+# (3) Five-Cluster receptor bank
+# ------------------------------------------------
+def make_receptor_bank_5clusters(
+    n_per_group=4,
+    jitter_hz=200,
+):
+    """
+    五簇听觉受体结构 (5 clusters × n_per_group)
+    使用你已接受的五簇中心频率 + bandwidth 方案
+    """
+
+    # 五簇中心频率（你已确认）
+    centers_base = np.array([
+        150,     # Low
+        350,     # Low-Mid
+        700,     # Mid
+        1500,    # High-Mid
+        3000     # High
+    ])
+
+    # 五簇带宽（你已确认）
+    bandwidths = np.array([
+        80,      # Low
+        120,     # Low-Mid
+        200,     # Mid
+        300,     # High-Mid
+        400      # High
+    ])
+
+    # --------------------------------------------
+    # 生成 jitter 后的中心频率
+    # --------------------------------------------
+    centers = []
+    widths = []
+    for base_c, base_w in zip(centers_base, bandwidths):
+        # 每簇生成 n_per_group 个 receptor
+        jittered = base_c + rng.normal(0, jitter_hz, size=n_per_group)
+        centers.extend(jittered)
+
+        # 对每个 receptor 指定相同簇的 bandwidth
+        widths.extend([base_w] * n_per_group)
+
+    centers = np.array(centers)
+    widths = np.array(widths)
+
+    # --------------------------------------------
+    # 构建敏感度矩阵
+    # receptor_sens.shape = [n_receptors, n_freqs]
+    # --------------------------------------------
+    sens_list = []
+    for c, w in zip(centers, widths):
+        sens_list.append(gaussian_freq_sensitivity(c, width_hz=w))
+
+    receptor_sens = np.stack(sens_list, axis=0)
+
+    return receptor_sens, centers, widths
+
+
+# ------------------------------------------------
+# (4) Five-cluster map
+# ------------------------------------------------
+def build_cluster_map_5clusters(n_per_group=4):
+    """
+    receptor index → cluster index
+    cluster indices = {0,1,2,3,4}
+    """
+    return np.array(
+        [0]*n_per_group +
+        [1]*n_per_group +
+        [2]*n_per_group +
+        [3]*n_per_group +
+        [4]*n_per_group
+    )
+
+
+# ------------------------------------------------
+# (5) Receptor activation（原样沿用 v1）
+# ------------------------------------------------
+def compute_receptor_activation(waveform, receptor_sens):
+    """
+    输入：1D 声波
+    输出：每个 receptor 的激活（线性匹配频谱）
+    """
+    spectrum = np.abs(np.fft.rfft(waveform))
+    spectrum = spectrum / (np.max(spectrum) + 1e-12)
+    activation = receptor_sens @ spectrum
+    activation = np.clip(activation, 0, None)
+    return activation
+
+
+# ------------------------------------------------
+# (6) Pooling into 5 clusters
+# ------------------------------------------------
+def pool_to_clusters_5clusters(receptor_act, cluster_map):
+    """
+    receptor_act: shape [n_receptors]
+    输出：5 维 cluster activation
+    """
+    cluster_vals = []
+    for k in range(5):
+        idx = np.where(cluster_map == k)[0]
+        cluster_vals.append(receptor_act[idx].mean())
+    return np.array(cluster_vals)
+
+
+# ------------------------------------------------
+# (7) Build bank now
+# ------------------------------------------------
+receptor_sens, receptor_centers, receptor_widths = make_receptor_bank_5clusters(
+    n_per_group=4,
+    jitter_hz=200,     # 根据你 v1 最终调参保持一致
+)
+
+cluster_map = build_cluster_map_5clusters(n_per_group=4)
+
+print("Cell 3 (v1.5) OK — Five-cluster receptor bank ready.")
+print("Receptor sensitivity matrix shape:", receptor_sens.shape)
+print("Cluster map:", cluster_map)
+print("Centers:", receptor_centers)
+print("Widths:", receptor_widths)
+
+# Quick test
+test_wave = make_audio_stimulus("pure", freq=440)
+test_rec = compute_receptor_activation(test_wave, receptor_sens)
+test_cluster = pool_to_clusters_5clusters(test_rec, cluster_map)
+
+print("Test receptor activation length:", len(test_rec))
+print("Cluster pooled activation:", test_cluster)
+
+Cell 3 (v1.5) OK — Five-cluster receptor bank ready.
+Receptor sensitivity matrix shape: (20, 8001)
+Cluster map: [0 0 0 0 1 1 1 1 2 2 2 2 3 3 3 3 4 4 4 4]
+Centers: [ 210.94341595  -57.99682125  300.09023916  338.11294328  -40.20703773
+   89.56409863  375.56808063  286.75148153  696.6397685   529.39121449
+  875.87959497  855.55838709 1513.20613951 1725.44824139 1593.50186845
+1328.14150742 3073.75015682 2808.22347983 3175.69006026 2990.0148178 ]
+Widths: [ 80  80  80  80 120 120 120 120 200 200 200 200 300 300 300 300 400 400
+ 400 400]
+Test receptor activation length: 20
+Cluster pooled activation: [2.83492220e-03 1.15113441e-01 1.46270201e-01 7.11195432e-12
+ 1.70292383e-13]
+
+# ================================================================
+# OBA Audio v1.5 — Cell 4
+# Energy State System (Δ2, energy update, processing cost)
+# ================================================================
+import numpy as np
+
+# ------------------------------------------------
+# (1) Energy Update — Deterministic
+# ------------------------------------------------
+def update_energy(E_prev, processing_cost, recovery=0.01):
+    """
+    与 v1 相同：
+    E(t+1) = E(t) - cost + recovery
+    限制 0~1 之间
+    """
+    E_new = E_prev - processing_cost + recovery
+    return float(np.clip(E_new, 0.0, 1.0))
+
+# ------------------------------------------------
+# (2) Energy Update + Noise
+# ------------------------------------------------
+def update_energy_with_noise(E_prev, processing_cost,
+                             recovery=0.01, noise_sigma=0.01, rng=None):
+    """
+    与 v1 相同，小幅能态噪声增强系统弹性
+    """
+    if rng is None:
+        rng = np.random.default_rng(42)
+
+    E_new = E_prev - processing_cost + recovery
+    E_new += rng.normal(0, noise_sigma)
+    return float(np.clip(E_new, 0.0, 1.0))
+
+# ------------------------------------------------
+# (3) Δ2 = E(t) - E(t-1)
+# ------------------------------------------------
+def compute_delta2(E_seq):
+    """
+    返回 Δ2 序列
+    第一项定义为 0
+    """
+    E_seq = np.array(E_seq)
+    d2 = np.zeros_like(E_seq)
+    if len(E_seq) > 1:
+        d2[1:] = E_seq[1:] - E_seq[:-1]
+    return d2
+
+# ------------------------------------------------
+# (4) Processing Cost Function (Audio version)
+# ------------------------------------------------
+def processing_cost_audio(cluster_act, prev_state=None,
+                          w_cluster=0.05, w_prev=0.02):
+    """
+    cluster_act 的维度现在是 5（五簇）
+    但能耗 = 平均激活强度，与簇数量无关，因此完全兼容
+
+    prev_state: 由 mitral dynamics 传入，维度同样从 3 → 5
+    """
+    # 当前簇激活
+    current_cost = np.mean(np.abs(cluster_act))
+
+    # 历史态
+    if prev_state is None:
+        prev_cost = 0.0
+    else:
+        prev_cost = np.mean(np.abs(prev_state))
+
+    total_cost = w_cluster * current_cost + w_prev * prev_cost
+    return float(total_cost)
+
+# ------------------------------------------------
+# Quick Test
+# ------------------------------------------------
+test_cluster = np.array([0.2, 0.5, 0.3, 0.1, 0.05])   # 五簇结构测试
+test_cost = processing_cost_audio(test_cluster)
+
+E0 = 1.0
+E1 = update_energy(E0, test_cost)
+E2 = update_energy(E1, test_cost)
+
+print("Cell 4 (v1.5) OK — Energy system ready.")
+print("Test cluster:", test_cluster)
+print("Cost:", test_cost)
+print("Energy trajectory:", [E0, E1, E2])
+
+Cell 4 (v1.5) OK — Energy system ready.
+Test cluster: [0.2  0.5  0.3  0.1  0.05]
+Cost: 0.011500000000000003
+Energy trajectory: [1.0, 0.9985, 0.9970000000000001]
+
+# ================================================================
+# OBA Audio v1.5 — Cell 5
+# Mitral Dynamics (5-channel) + Opponent Channels (BR / WA / EN)
+# ================================================================
+import numpy as np
+
+# -------------------------------------------------------------
+# 1. Mitral Dynamics — 五簇 (5-channel)
+# -------------------------------------------------------------
+def run_mitral_dynamics_audio_5(cluster_ts, alpha=0.55, inhib=0.10):
+    """
+    cluster_ts: shape [T, 5]
+    输出: mitral_ts shape [T, 5]
+    """
+
+    T = cluster_ts.shape[0]
+
+    # 前馈矩阵（5×5 单位阵）
+    W_in = np.eye(5)
+
+    # 侧抑制矩阵（五簇互相抑制，保持你 v1 的结构）
+    L = inhib * (np.ones((5,5)) - np.eye(5))
+
+    m = np.zeros(5)
+    mitral_list = []
+
+    for t in range(T):
+
+        drive = W_in @ cluster_ts[t]     # 前馈输入
+        lateral = L @ m                 # 侧向抑制
+
+        # v1 的核心动力系统：平滑 + ReLU
+        m = (1 - alpha) * m + alpha * np.maximum(0, drive - lateral)
+
+        mitral_list.append(m.copy())
+
+    return np.stack(mitral_list, axis=0)
+
+
+# -------------------------------------------------------------
+# 2. Opponent Channels (五簇扩展版)
+# -------------------------------------------------------------
+def opponent_channels_audio_5(mitral_ts):
+    """
+    输入: mitral_ts shape [T, 5], 顺序：
+    0: Low
+    1: Low-Mid
+    2: Mid
+    3: High-Mid
+    4: High
+
+    输出: dict{BR, WA, EN}，仍是 T 长度序列
+    """
+
+    L   = mitral_ts[:, 0]
+    LM  = mitral_ts[:, 1]
+    M   = mitral_ts[:, 2]
+    HM  = mitral_ts[:, 3]
+    H   = mitral_ts[:, 4]
+
+    # -------- Brightness --------
+    # 高频簇平均 - 低频簇平均
+    BR = 0.5 * (H + HM) - 0.5 * (L + LM)
+
+    # 随机微噪声（与你 v1 一致）
+    BR = BR + 0.10 * (rng.normal(0, 1, size=len(BR)))
+
+    # -------- Warmth / Nasality --------
+    # 中频（M） - peripheral clusters 平均
+    peripheral_avg = (L + LM + HM + H) / 4.0
+    WA = M - 0.5 * peripheral_avg
+
+    WA = WA + 0.10 * (rng.normal(0, 1, size=len(WA)))
+
+    # -------- Broadband Energy --------
+    EN = L + LM + M + HM + H
+
+    return {
+        "BR": BR,
+        "WA": WA,
+        "EN": EN
+    }
+
+
+# -------------------------------------------------------------
+# Quick Test
+# -------------------------------------------------------------
+# 构建一个假簇序列（五簇）
+test_cluster = np.array([0.2, 0.4, 0.6, 0.3, 0.1])
+cluster_ts = np.stack([test_cluster] * 20, axis=0)
+
+mitral_ts = run_mitral_dynamics_audio_5(cluster_ts)
+
+opp = opponent_channels_audio_5(mitral_ts)
+
+print("Cell 5 (v1.5) OK — Mitral + Opponent Channels ready.")
+print("Keys:", opp.keys())
+print("BR last value:", opp["BR"][-1])
+print("WA last value:", opp["WA"][-1])
+print("EN last value:", opp["EN"][-1])
+
+Cell 5 (v1.5) OK — Mitral + Opponent Channels ready.
+Keys: dict_keys(['BR', 'WA', 'EN'])
+BR last value: -0.03750485914517958
+WA last value: 0.5583659631550472
+EN last value: 1.1538461472762749
+
+# ================================================================
+# OBA Audio v1.6 — Cell H1
+# Harmonicity Extraction (基频 + 谐波匹配)
+# ================================================================
+import numpy as np
+from scipy.signal import find_peaks
+
+def compute_harmonicity(waveform, sample_rate=16000):
+    """
+    输入：1 秒音频（或任意时长）
+    输出：harm_score ∈ [0,1]
+    
+    方法：
+        1. 计算幅度谱
+        2. 找峰值
+        3. 寻找基频 candidate（最大峰对应频率）
+        4. 检查是否存在 2f0, 3f0, 4f0 等谐波
+        5. 匹配程度作为 harmonicity
+    """
+
+    # -----------------------------
+    # 1. 频谱
+    # -----------------------------
+    spectrum = np.abs(np.fft.rfft(waveform))
+    freqs = np.fft.rfftfreq(len(waveform), 1/sample_rate)
+
+    # 防止归一化出错
+    spectrum = spectrum / (np.max(spectrum) + 1e-12)
+
+    # -----------------------------
+    # 2. 找主峰（基频假设）
+    # -----------------------------
+    peaks, _ = find_peaks(spectrum, height=0.1)
+    if len(peaks) == 0:
+        return 0.0
+
+    # 主峰频率作为 f0
+    main_peak = peaks[np.argmax(spectrum[peaks])]
+    f0 = freqs[main_peak]
+
+    # pitch 下限
+    if f0 < 50:
+        return 0.0
+
+    # -----------------------------
+    # 3. 检测谐波
+    # -----------------------------
+    harmonic_count = 0
+    total_harmonics = 4  # 检查 2f0~5f0
+
+    for k in range(2, 6):
+        target = f0 * k
+        if target > freqs[-1]:
+            continue
+        
+        # 在 ±1% 范围找峰
+        tol = target * 0.01
+        idx = np.where((freqs > target - tol) & (freqs < target + tol))[0]
+        if len(idx) == 0:
+            continue
+        if spectrum[idx].max() > 0.1:
+            harmonic_count += 1
+
+    # -----------------------------
+    # 4. 谐波匹配程度（归一化）
+    # -----------------------------
+    harm_score = harmonic_count / total_harmonics
+    return float(harm_score)
+
+# ================================================================
+# OBA Audio v1.6 — Cell H2
+# Envelope Modulation Depth + Modulation Complexity
+# ================================================================
+import numpy as np
+from scipy.signal import hilbert
+from scipy.fft import rfft, rfftfreq
+
+def compute_envelope_modulation(waveform, sample_rate=16000):
+    """
+    输入：1D waveform
+    输出：
+        mod_depth   ∈ [0,1]    （包络起伏深度）
+        mod_complex ∈ [0,1]    （包络复杂度：高速变化比例）
+    
+    方法：
+        1. Hilbert Transform 得到 envelope(t)
+        2. modulation depth = envelope variance 正规化
+        3. envelope 的频谱 → 高频能量比重 = modulation complexity
+    """
+
+    # ------------------------------------------------------
+    # 1. Hilbert transform → envelope
+    # ------------------------------------------------------
+    analytic_signal = hilbert(waveform)
+    envelope = np.abs(analytic_signal)
+
+    # 归一化 envelope
+    envelope = envelope / (np.max(envelope) + 1e-12)
+
+    # ------------------------------------------------------
+    # 2. Modulation Depth（包络起伏深度）
+    #    variance 越大 → 调制越强
+    # ------------------------------------------------------
+    var = np.var(envelope)
+    # 正规化到 0~1
+    mod_depth = float( np.clip( (var * 10), 0, 1 ) )
+    # (10 是经验缩放，使常见波形得到合理范围)
+
+    # ------------------------------------------------------
+    # 3. Modulation Complexity（包络频谱高频占比）
+    # ------------------------------------------------------
+    env_spec = np.abs(rfft(envelope))
+    env_spec = env_spec / (np.max(env_spec) + 1e-12)
+
+    freqs = rfftfreq(len(envelope), 1/sample_rate)
+
+    # 高频（> 30Hz）成分占比
+    high_region = (freqs > 30)
+    high_energy = np.sum(env_spec[high_region])
+    low_energy = np.sum(env_spec[~high_region])
+
+    if high_energy + low_energy == 0:
+        mod_complex = 0.0
+    else:
+        mod_complex = float( high_energy / (high_energy + low_energy) )
+
+    # 裁剪到 0~1
+    mod_complex = float(np.clip(mod_complex, 0, 1))
+
+    return mod_depth, mod_complex
+
+
+# ------------------------------------------------------
+# Quick Test
+# ------------------------------------------------------
+test_wave = make_pure_tone(440)
+md, mc = compute_envelope_modulation(test_wave)
+
+print("Cell H2 OK — Envelope modulation ready.")
+print("Test modulation depth:", md)
+print("Test modulation complexity:", mc)
+
+Cell H2 OK — Envelope modulation ready.
+Test modulation depth: 5.35229249658927e-26
+Test modulation complexity: 1.935549375707245e-12
+
+# ================================================================
+# OBA Audio v1.6 — Cell H3
+# New Tone/Noise Definition (Harmonicity + Modulation)
+# ================================================================
+import numpy as np
+
+def compute_tone_noise_v16(
+    waveform,
+    sample_rate=16000,
+    w_harm_tone=0.7,
+    w_mod_tone=0.3,
+    w_harm_noise=0.6,
+    w_mod_noise=0.8
+):
+    """
+    输入：
+        waveform （任意声音）
+    输出：
+        tone_score  ∈ [0, 1]
+        noise_score ∈ [0, 1]
+
+    语义：
+        Tone = 高谐波 + 低调制
+        Noise = 低谐波 + 高调制
+    """
+
+    # -----------------------------------------
+    # 1. harmonicity (H1)
+    # -----------------------------------------
+    harm = compute_harmonicity(waveform, sample_rate)
+
+    # -----------------------------------------
+    # 2. envelope modulation (H2)
+    # -----------------------------------------
+    mod_depth, mod_complex = compute_envelope_modulation(
+        waveform, sample_rate
+    )
+
+    # -----------------------------------------
+    # 3. Tone Score
+    # -----------------------------------------
+    tone_raw = (
+        w_harm_tone * harm
+        + w_mod_tone * (1 - mod_depth)
+    )
+
+    # -----------------------------------------
+    # 4. Noise Score
+    # -----------------------------------------
+    noise_raw = (
+        w_harm_noise * (1 - harm)
+        + w_mod_noise * mod_depth
+    )
+
+    # -----------------------------------------
+    # 5. normalize to [0,1]
+    # -----------------------------------------
+    tone_score = float(np.clip(tone_raw, 0, 1))
+    noise_score = float(np.clip(noise_raw, 0, 1))
+
+    return tone_score, noise_score
+
+
+# ------------------------------------------------------------
+# Quick Test
+# ------------------------------------------------------------
+test_sine = make_pure_tone(440)
+test_noise = make_white_noise()
+
+print("Cell H3 OK — New Tone/Noise mapping ready.")
+
+print("Pure tone example:")
+print("tone_score, noise_score =", compute_tone_noise_v16(test_sine))
+
+print("White noise example:")
+print("tone_score, noise_score =", compute_tone_noise_v16(test_noise))
+
+Cell H3 OK — New Tone/Noise mapping ready.
+Pure tone example:
+tone_score, noise_score = (0.3, 0.6)
+White noise example:
+tone_score, noise_score = (0.4146633327600214, 0.6108977793066096)
+
+# ================================================================
+# OBA Audio v1.6 — Cell H4
+# Frame-based auditory feature extraction
+# (temporal slicing + per-frame harmonicity + per-frame modulation)
+# ================================================================
+import numpy as np
+
+def frame_waveform(
+    waveform,
+    sample_rate=16000,
+    frame_ms=20,
+    hop_ms=10
+):
+    """
+    将 waveform 切成帧：
+        frame_size = 20ms = 320 samples
+        hop = 10ms = 160 samples
+    输出:
+        frames: shape [num_frames, frame_size]
+    """
+    frame_size = int(sample_rate * frame_ms / 1000)
+    hop = int(sample_rate * hop_ms / 1000)
+
+    num_frames = 1 + (len(waveform) - frame_size) // hop
+    frames = []
+
+    for i in range(num_frames):
+        start = i * hop
+        end = start + frame_size
+        if end > len(waveform):
+            break
+        frame = waveform[start:end]
+        frames.append(frame)
+
+    return np.stack(frames, axis=0)
+
+
+def extract_frame_features_v16(frames, sample_rate=16000):
+    """
+    对每一帧提取：
+        1. harmonicity
+        2. modulation depth
+        3. modulation complexity
+        4. tone_score
+        5. noise_score
+
+    返回:
+        tone_seq  shape [T]
+        noise_seq shape [T]
+        harm_seq
+        mod_depth_seq
+        mod_complex_seq
+    """
+
+    T = frames.shape[0]
+
+    tone_seq = []
+    noise_seq = []
+
+    harm_seq = []
+    mod_depth_seq = []
+    mod_complex_seq = []
+
+    for t in range(T):
+        frame = frames[t]
+
+        # ---- H1 ----
+        harm = compute_harmonicity(frame, sample_rate)
+
+        # ---- H2 ----
+        mod_depth, mod_complex = compute_envelope_modulation(frame, sample_rate)
+
+        # ---- H3 ----
+        tone_val, noise_val = compute_tone_noise_v16(frame, sample_rate)
+
+        tone_seq.append(tone_val)
+        noise_seq.append(noise_val)
+
+        harm_seq.append(harm)
+        mod_depth_seq.append(mod_depth)
+        mod_complex_seq.append(mod_complex)
+
+    return (
+        np.array(tone_seq),
+        np.array(noise_seq),
+        np.array(harm_seq),
+        np.array(mod_depth_seq),
+        np.array(mod_complex_seq)
+    )
+
+
+print("Cell H4 (v1.6) OK — Frame slicing + frame-wise features ready.")
+
+Cell H4 (v1.6) OK — Frame slicing + frame-wise features ready.
+
+# ================================================================
+# OBA Audio v1.7 — Cell H4B
+# Zero-pad frames so FFT bins match receptor_sens frequency axis
+# ================================================================
+import numpy as np
+
+def compute_receptor_activation_frame(frame, receptor_sens, full_fft_size):
+    """
+    对单帧 frame 做 zero-padding 到 full_fft_size（例如 16000），
+    然后做 rfft，使得输出的 spectrum 与 receptor_sens 维度一致。
+    """
+    # Zero-pad 到指定长度
+    pad_len = full_fft_size - len(frame)
+    if pad_len < 0:
+        raise ValueError("Frame length is larger than base FFT size.")
+    padded = np.pad(frame, (0, pad_len), mode='constant')
+
+    # 做与 receptor bank 一样长度的 FFT
+    spectrum = np.abs(np.fft.rfft(padded))
+    spectrum = spectrum / (np.max(spectrum) + 1e-12)
+
+    # receptor activation
+    activation = receptor_sens @ spectrum
+    activation = np.clip(activation, 0, None)
+    return activation
+
+print("Cell H4B (v1.7) OK — Frame-compatible FFT ready.")
+
+Cell H4B (v1.7) OK — Frame-compatible FFT ready.
+
+# ================================================================
+# OBA Audio v1.6 — Cell 6B
+# Tone/Noise Dynamics (Harmonicity + Modulation Driven) + Soft-Gate
+# ================================================================
+import numpy as np
+
+def decision_competition_audio_v16(
+    tone_scores,
+    noise_scores,
+    Energy_seq,
+    gamma1=4.5,
+    gamma2=4.5,
+    alpha_dec=0.22,
+    inhib_dec=0.18,
+    theta_F=0.05,
+    instability_penalty=0.5
+):
+    """
+    输入：
+        tone_scores[t],  noise_scores[t]  ∈ [0,1]
+        Energy_seq[t] ∈ [0,1]
+
+    输出：
+        Tone_ts, Noise_ts, F_vals, stop_t
+    """
+
+    T = len(tone_scores)
+
+    Tone = 0.1
+    Noise = 0.1
+
+    Tone_ts = []
+    Noise_ts = []
+    F_vals = []
+
+    stop_t = None
+    delta2_prev = 0.0
+
+    for t in range(T):
+
+        E_t = Energy_seq[t]
+
+        # -----------------------------------------
+        # 1. 驱动来自 harmonicity/modulation 语义
+        # -----------------------------------------
+        drive_tone = tone_scores[t]
+        drive_noise = noise_scores[t]
+
+        comp_strength = inhib_dec * (0.5 + 0.5 * E_t)
+
+        # -----------------------------------------
+        # 2. 更新 Tone / Noise 动力
+        # -----------------------------------------
+        Tone = (1 - alpha_dec)*Tone + alpha_dec * max(0, drive_tone - comp_strength*Noise)
+        Noise = (1 - alpha_dec)*Noise + alpha_dec * max(0, drive_noise - comp_strength*Tone)
+
+        Tone_ts.append(Tone)
+        Noise_ts.append(Noise)
+
+        # -----------------------------------------
+        # 3. Soft-Gate（保持原机制不变）
+        # -----------------------------------------
+        if t > 0:
+
+            delta1 = abs( (Tone_ts[t] - Noise_ts[t])
+                        - (Tone_ts[t-1] - Noise_ts[t-1]) )
+
+            delta2_now = Energy_seq[t] - Energy_seq[t-1]
+
+            F_t = np.exp(-gamma1*delta1) * (1 / (1 + np.exp(gamma2 * delta2_now)))
+
+            if np.sign(delta2_prev) != np.sign(delta2_now):
+                F_t *= instability_penalty
+
+            F_vals.append(F_t)
+
+            if F_t < theta_F:
+                stop_t = t
+                print(f"[Soft-Gate v1.6] Terminated at t={t}, F={F_t:.4f}")
+                Tone_ts = Tone_ts[:t+1]
+                Noise_ts = Noise_ts[:t+1]
+                return np.array(Tone_ts), np.array(Noise_ts), F_vals, stop_t
+
+            delta2_prev = delta2_now
+
+        else:
+            F_vals.append(None)
+
+    # 若未 early stop
+    return np.array(Tone_ts), np.array(Noise_ts), F_vals, stop_t
+
+
+print("Cell 6B (v1.6) OK — New Tone/Noise dynamics ready.")
+
+Cell 6B (v1.6) OK — New Tone/Noise dynamics ready.
+
+# ================================================================
+# OBA Audio v1.7 — Cell 7C (Clean & Safe Version)
+# Frame-Based Full Pipeline (harmonicity + modulation + OBA dynamics)
+# ================================================================
+import numpy as np
+
+def run_energy_pipeline_audio_v17(
+    waveform,
+    receptor_sens,
+    cluster_map,
+    sample_rate=16000,
+    frame_ms=20,
+    hop_ms=10,
+    use_energy_noise=False,
+    noise_sigma=0.01,
+    rng=None
+):
+    """
+    v1.7 frame-based pipeline:
+    ------------------------------------
+    waveform →
+    frame slicing →
+    per-frame harmonicity & modulation →
+    per-frame receptor activation (zero-padded FFT) →
+    per-frame cluster pooling →
+    energy dynamics →
+    mitral dynamics (5-channel) →
+    BR/WA (visual only) →
+    Tone/Noise dynamics (Cell 6B) →
+    outputs (BR/WA, Tone/Noise, Energy, harm/mod sequences)
+    """
+
+    if rng is None:
+        rng = np.random.default_rng(42)
+
+    # ---------------------------------------------------------------
+    # (A) Determine FFT size used by receptor_sens
+    # ---------------------------------------------------------------
+    # receptor_sens.shape = (num_receptors, num_freq_bins)
+    # num_freq_bins = FFT_size//2 + 1 → FFT_size = 2*(num_freq_bins - 1)
+    num_freq_bins = receptor_sens.shape[1]
+    FULL_FFT_SIZE = 2 * (num_freq_bins - 1)   # e.g. 8001 → 16000
+
+    # ---------------------------------------------------------------
+    # (B) Frame slicing (Cell H4)
+    # ---------------------------------------------------------------
+    frames = frame_waveform(
+        waveform,
+        sample_rate=sample_rate,
+        frame_ms=frame_ms,
+        hop_ms=hop_ms
+    )
+    T = frames.shape[0]
+
+    # ---------------------------------------------------------------
+    # (C) Per-frame semantic features: harmonicity & modulation (H1,H2,H3)
+    # ---------------------------------------------------------------
+    (
+        tone_seq,
+        noise_seq,
+        harm_seq,
+        mod_depth_seq,
+        mod_complex_seq
+    ) = extract_frame_features_v16(frames, sample_rate)
+
+    # ---------------------------------------------------------------
+    # (D) Per-frame receptor activation + energy update
+    # ---------------------------------------------------------------
+    Energy_seq = []
+    E_t = 1.0
+
+    receptor_history = []
+    cluster_history = []
+
+    mitral_prev = np.zeros(5)
+
+    for t in range(T):
+
+        frame = frames[t]
+
+        # ---- Zero padded FFT, matches receptor_sens ----
+        rec = compute_receptor_activation_frame(
+            frame,
+            receptor_sens,
+            full_fft_size=FULL_FFT_SIZE
+        )
+        receptor_history.append(rec)
+
+        # ---- 5-cluster pooling ----
+        cluster_act = pool_to_clusters_5clusters(rec, cluster_map)
+        cluster_history.append(cluster_act)
+
+        # ---- energy update ----
+        cost = processing_cost_audio(cluster_act, mitral_prev)
+
+        if use_energy_noise:
+            E_t = update_energy_with_noise(
+                E_t, cost,
+                recovery=0.01,
+                noise_sigma=noise_sigma,
+                rng=rng
+            )
+        else:
+            E_t = update_energy(E_t, cost, recovery=0.01)
+
+        Energy_seq.append(E_t)
+
+    receptor_history = np.stack(receptor_history, axis=0)
+    cluster_history = np.stack(cluster_history, axis=0)
+    Energy_seq = np.array(Energy_seq)
+
+    # ---------------------------------------------------------------
+    # (E) 5-channel Mitral dynamics + BR/WA
+    # ---------------------------------------------------------------
+    mitral_ts = run_mitral_dynamics_audio_5(cluster_history)
+    opp = opponent_channels_audio_5(mitral_ts)
+
+    BR = opp["BR"]
+    WA = opp["WA"]
+
+    # ---------------------------------------------------------------
+    # (F) Tone/Noise dynamics (Cell 6B)
+    # ---------------------------------------------------------------
+    Tone_ts, Noise_ts, F_vals, stop_t = decision_competition_audio_v16(
+        tone_seq,
+        noise_seq,
+        Energy_seq
+    )
+
+    # ---------------------------------------------------------------
+    # (G) Return everything
+    # ---------------------------------------------------------------
+    return {
+        "BR": BR,
+        "WA": WA,
+        "Tone": Tone_ts,
+        "Noise": Noise_ts,
+        "Energy": Energy_seq,
+        "F_vals": F_vals,
+        "stop_t": stop_t,
+        "harm_seq": harm_seq,
+        "mod_depth_seq": mod_depth_seq,
+        "mod_complex_seq": mod_complex_seq,
+        "tone_seq": tone_seq,
+        "noise_seq": noise_seq,
+        "frames": frames
+    }
+
+print("Cell 7C (v1.7 CLEAN VERSION) OK — Frame-based full pipeline ready.")
+
+Cell 7C (v1.7 CLEAN VERSION) OK — Frame-based full pipeline ready.
+
+# ================================================================
+# OBA Audio v1.7 — Cell 8C
+# Frame-Based Visualization (BR/WA + Tone/Noise + Energy)
+# ================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+
+def plot_audio_energy_trajectory_v17(
+    result_dict,
+    title="OBA Audio v1.7 — Frame-Based Dynamics"
+):
+    """
+    输入：Cell 7C 输出的 result_dict
+        包含：
+            BR, WA
+            Tone, Noise
+            Energy
+            harm_seq, mod_depth_seq, mod_complex_seq
+            tone_seq, noise_seq
+            frames
+    """
+
+    BR  = result_dict["BR"]
+    WA  = result_dict["WA"]
+    Tone = result_dict["Tone"]
+    Noise = result_dict["Noise"]
+    Energy = result_dict["Energy"]
+
+    harm_seq = result_dict["harm_seq"]
+    mod_depth_seq = result_dict["mod_depth_seq"]
+    mod_complex_seq = result_dict["mod_complex_seq"]
+
+    tone_seq = result_dict["tone_seq"]
+    noise_seq = result_dict["noise_seq"]
+
+    T = len(BR)
+    t_series = np.arange(T)
+
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+
+    # ------------------------------------------------------------
+    # (1) BR/WA  — 真实随时间变化的频谱几何轨迹
+    # ------------------------------------------------------------
+    ax = axes[0,0]
+    ax.plot(BR, label="BR", color="purple")
+    ax.plot(WA, label="WA", color="teal")
+    ax.set_title("BR(t) / WA(t)")
+    ax.set_xlabel("Frame index")
+    ax.set_ylabel("Value")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    # ------------------------------------------------------------
+    # (2) Tone/Noise 语义动态
+    # ------------------------------------------------------------
+    ax = axes[0,1]
+    ax.plot(Tone, label="Tone(t)", color="blue")
+    ax.plot(Noise, label="Noise(t)", color="orange")
+    ax.set_title("Tone / Noise Dynamics (semantic)")
+    ax.set_xlabel("Frame index")
+    ax.set_ylabel("activation")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    # ------------------------------------------------------------
+    # (3) Energy(t)
+    # ------------------------------------------------------------
+    ax = axes[0,2]
+    ax.plot(Energy, color="green")
+    ax.set_title("Energy Dynamics")
+    ax.set_xlabel("Frame index")
+    ax.set_ylabel("Energy(t)")
+    ax.set_ylim(0,1)
+    ax.grid(alpha=0.3)
+
+    # ------------------------------------------------------------
+    # (4) Harmonicity(t)
+    # ------------------------------------------------------------
+    ax = axes[1,0]
+    ax.plot(harm_seq, color="blue")
+    ax.set_title("Harmonicity per Frame")
+    ax.set_xlabel("Frame index")
+    ax.grid(alpha=0.3)
+
+    # ------------------------------------------------------------
+    # (5) Modulation depth(t)
+    # ------------------------------------------------------------
+    ax = axes[1,1]
+    ax.plot(mod_depth_seq, color="red")
+    ax.set_title("Modulation Depth per Frame")
+    ax.set_xlabel("Frame index")
+    ax.grid(alpha=0.3)
+
+    # ------------------------------------------------------------
+    # (6) Modulation complexity(t)
+    # ------------------------------------------------------------
+    ax = axes[1,2]
+    ax.plot(mod_complex_seq, color="orange")
+    ax.set_title("Modulation Complexity per Frame")
+    ax.set_xlabel("Frame index")
+    ax.grid(alpha=0.3)
+
+    fig.suptitle(title, fontsize=16)
+    plt.tight_layout()
+    plt.show()
+
+print("Cell 8C (v1.7) OK — Frame-based visualization ready.")
+
+Cell 8C (v1.7) OK — Frame-based visualization ready.
+
+# ================================================================
+# OBA Audio v1.7 — Cell X
+# Multi-Stimulus Generator (7 hardware-friendly complex sounds)
+# ================================================================
+import numpy as np
+
+# ---------------------------------------------------------------
+# A. Tremolo (AM modulation) — 幅度调制纯音
+# ---------------------------------------------------------------
+def make_tremolo(
+    carrier_freq=440,
+    mod_freq=5,
+    mod_depth=0.8,
+    sample_rate=16000
+):
+    """
+    硬件能轻易生成的 AM 调制音：
+    amplitude = (1 - depth)/2 + (depth/2) * sin(2π f_mod t)
+    tone = amplitude * sin(2π f_carrier t)
+    """
+    t = np.linspace(0, 1.0, sample_rate, endpoint=False)
+    amp = (1 - mod_depth)/2 + (mod_depth/2) * (1 + np.sin(2*np.pi*mod_freq*t))
+    tone = amp * np.sin(2*np.pi*carrier_freq*t)
+    tone /= (np.max(np.abs(tone)) + 1e-12)
+    return tone
+
+
+# ---------------------------------------------------------------
+# B. Vibrato (FM modulation) — 频率抖动纯音
+# ---------------------------------------------------------------
+def make_vibrato(
+    carrier_freq=440,
+    mod_freq=5,
+    freq_deviation=30,
+    sample_rate=16000
+):
+    """
+    f(t) = carrier + freq_dev * sin(2π f_mod t)
+    """
+    t = np.linspace(0, 1.0, sample_rate, endpoint=False)
+    inst_freq = carrier_freq + freq_deviation * np.sin(2*np.pi*mod_freq*t)
+    phase = 2*np.pi*np.cumsum(inst_freq) / sample_rate
+    tone = np.sin(phase)
+    tone /= (np.max(np.abs(tone)) + 1e-12)
+    return tone
+
+
+# ---------------------------------------------------------------
+# C. Chirp — 线性扫频
+# ---------------------------------------------------------------
+def make_chirp(
+    f0=200,
+    f1=3000,
+    sample_rate=16000
+):
+    """
+    线性扫频：频率从 f0 → f1
+    """
+    t = np.linspace(0, 1.0, sample_rate, endpoint=False)
+    freqs = np.linspace(f0, f1, len(t))
+    phase = 2*np.pi*np.cumsum(freqs) / sample_rate
+    chirp = np.sin(phase)
+    chirp /= (np.max(np.abs(chirp)) + 1e-12)
+    return chirp
+
+
+# ---------------------------------------------------------------
+# D. Noise bursts — 间歇噪声脉冲
+# ---------------------------------------------------------------
+def make_noise_bursts(
+    burst_length=0.05,
+    interval=0.1,
+    sample_rate=16000,
+    total_time=1.0
+):
+    """
+    noise burst (50ms) → silence → noise burst ...
+    """
+    N = int(sample_rate * total_time)
+    signal = np.zeros(N)
+
+    burst = np.random.randn(int(sample_rate * burst_length))
+    burst /= (np.max(np.abs(burst)) + 1e-12)
+
+    step = int(sample_rate * interval)
+
+    for i in range(0, N, step):
+        end = min(i + len(burst), N)
+        signal[i:end] = burst[:end-i]
+
+    return signal
+
+
+# ---------------------------------------------------------------
+# E. Tone → Noise — 分段音频
+# ---------------------------------------------------------------
+def make_tone_to_noise(
+    tone_freq=440,
+    split_point=0.5,
+    sample_rate=16000
+):
+    """
+    前半段纯音，后半段噪声
+    """
+    N = sample_rate
+    t = np.linspace(0, 1.0, N, endpoint=False)
+
+    tone = np.sin(2*np.pi*tone_freq*t)
+    tone /= (np.max(np.abs(tone)) + 1e-12)
+
+    noise = np.random.randn(N)
+    noise /= (np.max(np.abs(noise)) + 1e-12)
+
+    out = np.where(t < split_point, tone, noise)
+    return out
+
+
+# ---------------------------------------------------------------
+# F. Multi-tone complex with amplitude motion
+# ---------------------------------------------------------------
+def make_multi_complex(
+    freqs=[220, 440, 880],
+    amp_motion_freq=2,
+    sample_rate=16000
+):
+    """
+    多纯音叠加 + 振幅轻微震荡
+    """
+    t = np.linspace(0, 1.0, sample_rate, endpoint=False)
+    amp = 0.7 + 0.3*np.sin(2*np.pi*amp_motion_freq*t)
+
+    signal = np.zeros_like(t)
+    for f in freqs:
+        signal += amp * np.sin(2*np.pi*f*t)
+
+    signal /= (np.max(np.abs(signal)) + 1e-12)
+    return signal
+
+
+# ---------------------------------------------------------------
+# G. Noise → Tone → Noise — 三相声源
+# ---------------------------------------------------------------
+def make_noise_tone_noise(
+    tone_freq=440,
+    sample_rate=16000
+):
+    """
+    0~0.33: noise
+    0.33~0.66: tone
+    0.66~1.0: noise
+    """
+    N = sample_rate
+    t = np.linspace(0, 1.0, N, endpoint=False)
+
+    tone = np.sin(2*np.pi*tone_freq*t)
+    tone /= (np.max(np.abs(tone)) + 1e-12)
+
+    noise = np.random.randn(N)
+    noise /= (np.max(np.abs(noise)) + 1e-12)
+
+    out = np.zeros_like(t)
+    out[t < 0.33] = noise[t < 0.33]
+    out[(t >= 0.33) & (t < 0.66)] = tone[(t >= 0.33) & (t < 0.66)]
+    out[t >= 0.66] = noise[t >= 0.66]
+    return out
+
+
+print("Cell X (v1.7) OK — Multi-stimulus generator ready.")
+
+Cell X (v1.7) OK — Multi-stimulus generator ready.
+
+# ================================================================
+# OBA Audio v1.7 — Cell X-Batch
+# Automatically test 7 complex stimuli
+# ================================================================
+stimuli = {
+    "A_tremolo": make_tremolo(),
+    "B_vibrato": make_vibrato(),
+    "C_chirp": make_chirp(),
+    "D_noise_bursts": make_noise_bursts(),
+    "E_tone_to_noise": make_tone_to_noise(),
+    "F_multi_complex": make_multi_complex(),
+    "G_noise_tone_noise": make_noise_tone_noise()
+}
+
+for name, wave in stimuli.items():
+    print(f"\n=== Running stimulus: {name} ===")
+    result = run_energy_pipeline_audio_v17(
+        wave,
+        receptor_sens,
+        cluster_map
+    )
+    plot_audio_energy_trajectory_v17(
+        result,
+        title=f"OBA Audio v1.7 — {name}"
+    )
+print("Cell X-Batch OK — all 7 tests completed.")
+
+=== Running stimulus: A_tremolo ===
+
+=== Running stimulus: B_vibrato ===
+
+=== Running stimulus: C_chirp ===
+
+=== Running stimulus: D_noise_bursts ===
+
+=== Running stimulus: E_tone_to_noise ===
+
+=== Running stimulus: F_multi_complex ===
+
+=== Running stimulus: G_noise_tone_noise ===
+
+Cell X-Batch OK — all 7 tests completed.
+
+# ================================================================
+# OBA Audio v1.8 — Cell M1
+# Build frame-level manifold embedding vector (8D)
+# ================================================================
+import numpy as np
+
+def build_manifold_vectors_v18(result_dict):
+    """
+    输入：
+        result_dict 来自 run_energy_pipeline_audio_v17 的返回值
+        包含 frame-wise:
+            harm_seq
+            mod_depth_seq
+            mod_complex_seq
+            BR
+            WA
+            Tone
+            Noise
+            Energy
+
+    输出：
+        X_full: shape [T, 8]    全帧（dense）embedding
+    """
+
+    harm_seq      = result_dict["harm_seq"]
+    mod_d_seq     = result_dict["mod_depth_seq"]
+    mod_c_seq     = result_dict["mod_complex_seq"]
+    BR            = result_dict["BR"]
+    WA            = result_dict["WA"]
+    Tone          = result_dict["Tone"]
+    Noise         = result_dict["Noise"]
+    Energy        = result_dict["Energy"]
+
+    # 统一长度 T
+    T = min(
+        len(harm_seq),
+        len(mod_d_seq),
+        len(mod_c_seq),
+        len(BR),
+        len(WA),
+        len(Tone),
+        len(Noise),
+        len(Energy)
+    )
+
+    X_full = np.stack([
+        harm_seq[:T],
+        mod_d_seq[:T],
+        mod_c_seq[:T],
+        BR[:T],
+        WA[:T],
+        Tone[:T],
+        Noise[:T],
+        Energy[:T]
+    ], axis=1)
+
+    print(f"[Cell M1] Manifold vectors built: shape = {X_full.shape}")
+    return X_full
+
+# ================================================================
+# OBA Audio v1.8 — Cell M2
+# Multi-stimulus dataset builder for manifold learning
+# ================================================================
+import numpy as np
+
+def build_manifold_dataset_v18(stimuli_dict, receptor_sens, cluster_map):
+    """
+    输入：
+        stimuli_dict:  {"name": waveform, ...}
+    输出：
+        X_all:      所有帧的 8D 向量 (num_total_frames, 8)
+        labels_all: 每个帧对应的刺激名 (for color coding)
+        index_all:  每个帧是该刺激的第几帧 (for trajectory)
+    """
+
+    X_all = []
+    labels_all = []
+    index_all = []
+
+    for name, wave in stimuli_dict.items():
+        print(f"[M2] Processing stimulus: {name}")
+
+        # ---- 运行 v1.7 pipeline ----
+        result = run_energy_pipeline_audio_v17(
+            wave,
+            receptor_sens,
+            cluster_map
+        )
+
+        # ---- 8D manifold embedding ----
+        X = build_manifold_vectors_v18(result)
+
+        # 记录
+        X_all.append(X)
+        labels_all += [name] * len(X)
+        index_all += list(range(len(X)))
+
+    X_all = np.vstack(X_all)
+    labels_all = np.array(labels_all)
+    index_all  = np.array(index_all)
+
+    print(f"[M2] Combined dataset shape = {X_all.shape}")
+    return X_all, labels_all, index_all
+
+# ================================================================
+# OBA Audio v1.8 — Cell M3
+# PCA manifold visualization
+# ================================================================
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+
+def plot_pca_manifold_v18(X, labels):
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X)
+
+    print("[M3] PCA explained variance ratio:", pca.explained_variance_ratio_)
+
+    # 绘图
+    plt.figure(figsize=(8, 6))
+    unique_labels = np.unique(labels)
+
+    for lab in unique_labels:
+        idx = np.where(labels == lab)[0]
+        plt.scatter(X_pca[idx,0], X_pca[idx,1], s=35, alpha=0.7, label=lab)
+
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    plt.title("OBA Audio v1.8 — PCA Semantic Manifold")
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.show()
+
+    return X_pca
+
+# ================================================================
+# OBA Audio v1.8 — Cell M4
+# UMAP manifold visualization
+# ================================================================
+import umap
+import matplotlib.pyplot as plt
+
+def plot_umap_manifold_v18(X, labels, n_neighbors=20, min_dist=0.1):
+    reducer = umap.UMAP(
+        n_neighbors=n_neighbors,
+        min_dist=min_dist,
+        metric='euclidean',
+        random_state=42
+    )
+    X_umap = reducer.fit_transform(X)
+
+    plt.figure(figsize=(8, 6))
+    unique_labels = np.unique(labels)
+
+    for lab in unique_labels:
+        idx = np.where(labels == lab)[0]
+        plt.scatter(
+            X_umap[idx,0], X_umap[idx,1],
+            s=35, alpha=0.8, label=lab
+        )
+
+    plt.xlabel("UMAP-1")
+    plt.ylabel("UMAP-2")
+    plt.title("OBA Audio v1.8 — UMAP Semantic Manifold")
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.show()
+
+    return X_umap
+
+# ================================================================
+# OBA Audio v1.8 — Cell M5
+# Trajectory overlay on manifold
+# ================================================================
+import matplotlib.pyplot as plt
+import numpy as np
+
+def plot_manifold_trajectories_v18(X_low, labels, index_all, title):
+    """
+    X_low: PCA 或 UMAP 的二维嵌入 (N,2)
+    labels: 每帧属于哪个刺激
+    index_all: 每帧的 frame index（用于排序）
+    """
+
+    plt.figure(figsize=(10,8))
+    unique_labels = np.unique(labels)
+
+    for lab in unique_labels:
+        idx = np.where(labels == lab)[0]
+
+        # 根据帧序排序（确保轨迹方向一致）
+        sorted_idx = idx[np.argsort(index_all[idx])]
+
+        plt.plot(
+            X_low[sorted_idx,0],
+            X_low[sorted_idx,1],
+            '-o',
+            markersize=3,
+            alpha=0.7,
+            label=lab
+        )
+
+    plt.xlabel("Dim 1")
+    plt.ylabel("Dim 2")
+    plt.title(title)
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.show()
+
+# 1. 使用你已经生成的 stimuli（Cell X）
+stimuli = {
+    "A_tremolo": make_tremolo(),
+    "B_vibrato": make_vibrato(),
+    "C_chirp": make_chirp(),
+    "D_noise_bursts": make_noise_bursts(),
+    "E_tone_to_noise": make_tone_to_noise(),
+    "F_multi_complex": make_multi_complex(),
+    "G_noise_tone_noise": make_noise_tone_noise()
+}
+
+# 2. 构建 manifold 数据集
+X_all, labels_all, index_all = build_manifold_dataset_v18(
+    stimuli, receptor_sens, cluster_map
+)
+
+# 3. PCA Manifold
+X_pca = plot_pca_manifold_v18(X_all, labels_all)
+
+# 4. PCA Trajectory Overlay
+plot_manifold_trajectories_v18(
+    X_pca, labels_all, index_all,
+    title="OBA Audio v1.8 — PCA Trajectories"
+)
+
+# 5. UMAP Manifold
+X_umap = plot_umap_manifold_v18(X_all, labels_all)
+
+# 6. UMAP Trajectories
+plot_manifold_trajectories_v18(
+    X_umap, labels_all, index_all,
+    title="OBA Audio v1.8 — UMAP Trajectories"
+)
+
+[M2] Processing stimulus: A_tremolo
+[Cell M1] Manifold vectors built: shape = (99, 8)
+[M2] Processing stimulus: B_vibrato
+[Cell M1] Manifold vectors built: shape = (99, 8)
+[M2] Processing stimulus: C_chirp
+[Cell M1] Manifold vectors built: shape = (99, 8)
+[M2] Processing stimulus: D_noise_bursts
+[Cell M1] Manifold vectors built: shape = (99, 8)
+[M2] Processing stimulus: E_tone_to_noise
+[Cell M1] Manifold vectors built: shape = (99, 8)
+[M2] Processing stimulus: F_multi_complex
+[Cell M1] Manifold vectors built: shape = (99, 8)
+[M2] Processing stimulus: G_noise_tone_noise
+[Cell M1] Manifold vectors built: shape = (99, 8)
+[M2] Combined dataset shape = (693, 8)
+[M3] PCA explained variance ratio: [0.92066521 0.07930643]
+
+
+/opt/anaconda3/envs/vtdc_torch/lib/python3.10/site-packages/umap/umap_.py:1952: UserWarning: n_jobs value 1 overridden to 1 by setting random_state. Use no seed for parallelism.
+  warn(
+/opt/anaconda3/envs/vtdc_torch/lib/python3.10/site-packages/sklearn/manifold/_spectral_embedding.py:328: UserWarning: Graph is not fully connected, spectral embedding may not work as expected.
+  warnings.warn(
+
+
+
+# ================================================================
+# OBA Audio v1.9 — Cell T1
+# Harmonicity Onset Detection
+# ================================================================
+
+def detect_harmonicity_onset(harm_seq, thresh=0.15):
+    """
+    第一次 harmonicity 超过阈值 (默认0.15)
+    表示系统第一次检测到“谱规律结构”
+    """
+    harm_seq = np.array(harm_seq)
+    idx = np.where(harm_seq > thresh)[0]
+    return int(idx[0]) if len(idx) > 0 else None
+
+# ================================================================
+# OBA Audio v1.9 — Cell T2
+# Modulation Onset Detection (depth or complexity)
+# ================================================================
+
+def detect_modulation_onset(mod_depth_seq, mod_complex_seq,
+                            depth_thresh=0.12, complex_thresh=0.15):
+    """
+    第一次出现显著 modulation（幅度抖动）
+    可用 mod_depth 或 mod_complexity 任何一个穿过阈值
+    """
+    d = np.where(np.array(mod_depth_seq) > depth_thresh)[0]
+    c = np.where(np.array(mod_complex_seq) > complex_thresh)[0]
+
+    candidates = []
+    if len(d)>0: candidates.append(d[0])
+    if len(c)>0: candidates.append(c[0])
+
+    return min(candidates) if len(candidates)>0 else None
+
+# ================================================================
+# OBA Audio v1.9 — Cell T3
+# Tone/Noise Attractor Onset
+# ================================================================
+
+def detect_tone_noise_onset(Tone, Noise, thresh=0.02):
+    """
+    Tone(t) - Noise(t) 首次穿越零点（或超过某差值）
+    表示 OBA 动力系统第一次做出“方向性决策”
+    """
+    diff = np.array(Tone) - np.array(Noise)
+
+    # 1）找到sign flip
+    flip = np.where(np.sign(diff[1:]) != np.sign(diff[:-1]))[0]
+    if len(flip) > 0:
+        return int(flip[0] + 1)
+
+    # 2）若无flip，找首次差值超过阈值
+    idx = np.where(np.abs(diff) > thresh)[0]
+    return int(idx[0]) if len(idx) > 0 else None
+
+# ================================================================
+# OBA Audio v1.9 — Cell T4
+# Energy Curvature Onset
+# ================================================================
+
+def detect_energy_curvature_onset(Energy, window=3, slope_thresh=0.005):
+    """
+    检测 Energy(t) 二阶差分在一定窗口内变“平”（|d2| < thresh）
+    标志系统内部动力趋向稳定（attractor entry）
+    """
+    E = np.array(Energy)
+    if len(E) < 4:
+        return None
+
+    d1 = np.diff(E)
+    d2 = np.diff(d1)
+
+    for t in range(window, len(d2)):
+        if np.all(np.abs(d2[t-window:t]) < slope_thresh):
+            return t
+    return None
+
+# ================================================================
+# OBA Audio v1.9 — Cell T-Analyze
+# Integrate all 4 onsets for one stimulus
+# ================================================================
+
+def analyze_onsets_v19(result):
+    harm_seq      = result["harm_seq"]
+    mod_depth_seq = result["mod_depth_seq"]
+    mod_complex_seq = result["mod_complex_seq"]
+    Tone = result["Tone"]
+    Noise = result["Noise"]
+    Energy = result["Energy"]
+
+    onset_harm = detect_harmonicity_onset(harm_seq)
+    onset_mod  = detect_modulation_onset(mod_depth_seq, mod_complex_seq)
+    onset_tn   = detect_tone_noise_onset(Tone, Noise)
+    onset_eng  = detect_energy_curvature_onset(Energy)
+
+    print("\n=== Temporal Onset Report ===")
+    print("Harmonicity onset:", onset_harm)
+    print("Modulation  onset:", onset_mod)
+    print("Tone/Noise  onset:", onset_tn)
+    print("Energy      onset:", onset_eng)
+
+    return onset_harm, onset_mod, onset_tn, onset_eng
+
+# ================================================================
+# OBA Audio v1.9 — Cell T-Overlay
+# Visualization with onset markers
+# ================================================================
+
+def plot_with_onsets_v19(result, onsets, title="OBA Audio v1.9 — Temporal Onset Overlay"):
+    onset_harm, onset_mod, onset_tn, onset_eng = onsets
+
+    BR = result["BR"]
+    WA = result["WA"]
+    Tone = result["Tone"]
+    Noise = result["Noise"]
+    Energy = result["Energy"]
+
+    harm = result["harm_seq"]
+    modd = result["mod_depth_seq"]
+    modc = result["mod_complex_seq"]
+
+    T = len(BR)
+    t_axis = np.arange(T)
+
+    fig, axes = plt.subplots(2, 3, figsize=(18,10))
+    
+    # ---- 1: BR/WA ----
+    ax = axes[0,0]
+    ax.plot(BR, label="BR")
+    ax.plot(WA, label="WA")
+    if onset_harm is not None:
+        ax.axvline(onset_harm, color='red', linestyle='--', label='harm onset')
+    ax.set_title("BR/WA")
+    ax.legend(); ax.grid(alpha=0.3)
+
+    # ---- 2: Tone/Noise ----
+    ax = axes[0,1]
+    ax.plot(Tone, label="Tone")
+    ax.plot(Noise, label="Noise")
+    if onset_tn is not None:
+        ax.axvline(onset_tn, color='green', linestyle='--', label='T/N onset')
+    ax.set_title("Tone/Noise Dynamics")
+    ax.legend(); ax.grid(alpha=0.3)
+
+    # ---- 3: Energy ----
+    ax = axes[0,2]
+    ax.plot(Energy, label="Energy", color='purple')
+    if onset_eng is not None:
+        ax.axvline(onset_eng, color='orange', linestyle='--', label='Energy onset')
+    ax.set_title("Energy(t)")
+    ax.legend(); ax.grid(alpha=0.3)
+
+    # ---- 4: Harmonicity ----
+    ax = axes[1,0]
+    ax.plot(harm)
+    if onset_harm is not None:
+        ax.axvline(onset_harm, color='red', linestyle='--')
+    ax.set_title("Harmonicity")
+    ax.grid(alpha=0.3)
+
+    # ---- 5: Modulation Depth ----
+    ax = axes[1,1]
+    ax.plot(modd, label="mod depth")
+    if onset_mod is not None:
+        ax.axvline(onset_mod, color='blue', linestyle='--')
+    ax.set_title("Mod Depth")
+    ax.grid(alpha=0.3)
+
+    # ---- 6: Mod Complexity ----
+    ax = axes[1,2]
+    ax.plot(modc, label="mod complex")
+    if onset_mod is not None:
+        ax.axvline(onset_mod, color='blue', linestyle='--')
+    ax.set_title("Mod Complexity")
+    ax.grid(alpha=0.3)
+
+    fig.suptitle(title, fontsize=16)
+    plt.tight_layout()
+    plt.show()
+
+# ================================================================
+# OBA Audio v1.9 — Cell T-Batch
+# Batch onset analysis for all seven stimuli
+# ================================================================
+
+def batch_onset_analysis_v19(stimuli, receptor_sens, cluster_map):
+    for name, wave in stimuli.items():
+        print(f"\n\n### Stimulus: {name} ###")
+
+        result = run_energy_pipeline_audio_v17(wave, receptor_sens, cluster_map)
+
+        onsets = analyze_onsets_v19(result)
+
+        plot_with_onsets_v19(
+            result,
+            onsets,
+            title=f"OBA Audio v1.9 — Onset Overlay ({name})"
+        )
+
+# ================================================================
+# OBA Audio v1.9 — Cell T-Run
+# Run temporal onset analysis on all 7 stimuli
+# ================================================================
+
+stimuli = {
+    "A_tremolo": make_tremolo(),
+    "B_vibrato": make_vibrato(),
+    "C_chirp": make_chirp(),
+    "D_noise_bursts": make_noise_bursts(),
+    "E_tone_to_noise": make_tone_to_noise(),
+    "F_multi_complex": make_multi_complex(),
+    "G_noise_tone_noise": make_noise_tone_noise()
+}
+
+batch_onset_analysis_v19(
+    stimuli,
+    receptor_sens,
+    cluster_map
+)
+
+### Stimulus: A_tremolo ###
+
+=== Temporal Onset Report ===
+Harmonicity onset: None
+Modulation  onset: 0
+Tone/Noise  onset: 0
+Energy      onset: 5
+
+### Stimulus: B_vibrato ###
+
+=== Temporal Onset Report ===
+Harmonicity onset: None
+Modulation  onset: 1
+Tone/Noise  onset: 0
+Energy      onset: 5
+
+### Stimulus: C_chirp ###
+
+=== Temporal Onset Report ===
+Harmonicity onset: None
+Modulation  onset: 0
+Tone/Noise  onset: 0
+Energy      onset: 4
+
+### Stimulus: D_noise_bursts ###
+
+=== Temporal Onset Report ===
+Harmonicity onset: 1
+Modulation  onset: 0
+Tone/Noise  onset: 3
+Energy      onset: 3
+
+### Stimulus: E_tone_to_noise ###
+
+=== Temporal Onset Report ===
+Harmonicity onset: 51
+Modulation  onset: 0
+Tone/Noise  onset: 54
+Energy      onset: 5
+
+### Stimulus: F_multi_complex ###
+
+=== Temporal Onset Report ===
+Harmonicity onset: 0
+Modulation  onset: 0
+Tone/Noise  onset: 0
+Energy      onset: 3
+
+### Stimulus: G_noise_tone_noise ###
+
+=== Temporal Onset Report ===
+Harmonicity onset: 0
+Modulation  onset: 0
+Tone/Noise  onset: 1
+Energy      onset: 3
+
+
+# ================================================================
+# Sound Tuner Twin — Step 1
+# OBA2 Audio Observer (Read-Only Skeleton)
+# ================================================================
+
+import numpy as np
+
+class OBA2_AudioObserver:
+    """
+    OBA2 (Audio) - Read-only observer skeleton
+
+    Design principles:
+    - No decision-making
+    - No modulation
+    - No early-stop
+    - Energy state is recorded ONLY
+    """
+
+    def __init__(self):
+        # -------- Memory (initially empty) --------
+        self.memory = []
+
+        # -------- Recorded sequences (for analysis only) --------
+        self.energy_log = []
+        self.cluster_log = []
+        self.tone_noise_log = []
+
+        # -------- State flags --------
+        self.oba1_active = True
+        self.triggered_independent = False
+
+    def observe_step(self, oba1_state):
+        """
+        Observe ONE time step of OBA1.
+
+        oba1_state: dict with keys (examples)
+        {
+            "cluster_act": np.array shape (5,),
+            "Energy": float,
+            "Tone": float,
+            "Noise": float
+        }
+        """
+
+        # --- Extract observed quantities ---
+        cluster_act = np.array(oba1_state["cluster_act"], copy=True)
+        energy = float(oba1_state["Energy"])
+        tone = float(oba1_state["Tone"])
+        noise = float(oba1_state["Noise"])
+
+        # --- Record logs (read-only) ---
+        self.cluster_log.append(cluster_act)
+        self.energy_log.append(energy)
+        self.tone_noise_log.append((tone, noise))
+
+        # --- Store into memory as raw context snapshot ---
+        self.memory.append({
+            "cluster_act": cluster_act,
+            "Energy": energy,
+            "Tone": tone,
+            "Noise": noise
+        })
+
+    def detect_oba1_abnormal(self, energy_thresh=1e-4, window=3):
+        """
+        Purely statistical abnormality detection.
+        No external signal.
+        """
+
+        if len(self.energy_log) < window:
+            return False
+
+        recent = np.array(self.energy_log[-window:])
+        if np.all(recent < energy_thresh):
+            return True
+
+        if np.std(recent) < energy_thresh:
+            return True
+
+        return False
+
+    def check_and_mark_transition(self):
+        """
+        Mark OBA1 abnormality WITHOUT changing behavior.
+        """
+
+        if self.oba1_active and self.detect_oba1_abnormal():
+            self.oba1_active = False
+            self.triggered_independent = True
+            print("[OBA2] Detected OBA1 abnormal state — independent phase flagged.")
+
+# ================================================================
+# Explicitly create OBA2 observer instance
+# ================================================================
+
+oba2 = OBA2_AudioObserver()
+print("OBA2 observer instantiated.")
+
+OBA2 observer instantiated.
+
+# ================================================================
+# Sound Tuner Twin — Step 2 (FIXED)
+# Passive Coupling: OBA1 → OBA2 Observation Loop
+# ================================================================
+
+def run_audio_twin_observation(
+    waveform,
+    oba1_pipeline_fn,
+    receptor_sens,
+    cluster_map,
+    sample_rate=16000,
+    frame_ms=20,
+    hop_ms=10
+):
+    """
+    Run OBA1 normally, while OBA2 passively observes each frame.
+
+    FIXED:
+    - Observe BR / WA instead of cluster_ts
+    """
+
+    oba2 = OBA2_AudioObserver()
+
+    result = oba1_pipeline_fn(
+        waveform,
+        receptor_sens,
+        cluster_map,
+        sample_rate=sample_rate,
+        frame_ms=frame_ms,
+        hop_ms=hop_ms
+    )
+
+    BR_ts    = result["BR"]
+    WA_ts    = result["WA"]
+    Energy_ts = result["Energy"]
+    Tone_ts   = result["Tone"]
+    Noise_ts  = result["Noise"]
+
+    T = len(Energy_ts)
+
+    for t in range(T):
+        oba1_state = {
+            "cluster_act": np.array([BR_ts[t], WA_ts[t]]),  # 抽象中间态
+            "Energy": Energy_ts[t],
+            "Tone": Tone_ts[t],
+            "Noise": Noise_ts[t]
+        }
+
+        oba2.observe_step(oba1_state)
+        oba2.check_and_mark_transition()
+
+    return result, oba2
+
+# Explicitly create stimulus waveform
+F_multi_complex = make_multi_complex()
+
+print("Stimulus created:", F_multi_complex.shape)
+
+Stimulus created: (16000,)
+
+# ================================================================
+# Re-run Step 2: Passive OBA1 → OBA2 observation
+# ================================================================
+
+result, oba2 = run_audio_twin_observation(
+    waveform=make_multi_complex(),
+    oba1_pipeline_fn=run_energy_pipeline_audio_v17,
+    receptor_sens=receptor_sens,
+    cluster_map=cluster_map,
+    sample_rate=sample_rate
+)
+
+print("Step 2 rerun complete.")
+print("OBA2 memory size:", len(oba2.memory))
+
+[OBA2] Detected OBA1 abnormal state — independent phase flagged.
+Step 2 rerun complete.
+OBA2 memory size: 99
+
+# ================================================================
+# Sound Tuner Twin — Step 3
+# OBA2 Independent Audio Run (Passive, No-Goal)
+# ================================================================
+
+def run_oba2_independent_audio(
+    waveform,
+    oba2_observer,
+    oba2_pipeline_fn,
+    receptor_sens,
+    cluster_map,
+    sample_rate=16000,
+    frame_ms=20,
+    hop_ms=10
+):
+    """
+    OBA2 runs sound-tuner pipeline independently after OBA1 abnormality.
+
+    Rules:
+    - No energy-based stop
+    - No goal / decision enforcement
+    - Energy is recorded but never used
+    """
+
+    if not oba2_observer.triggered_independent:
+        raise RuntimeError(
+            "OBA2 independent phase triggered before OBA1 abnormality."
+        )
+
+    # --- Run sound tuner pipeline independently ---
+    result = oba2_pipeline_fn(
+        waveform,
+        receptor_sens,
+        cluster_map,
+        sample_rate=sample_rate,
+        frame_ms=frame_ms,
+        hop_ms=hop_ms
+    )
+
+    # --- Record energy as passive observable ---
+    oba2_observer.energy_independent_log = np.array(result["Energy"], copy=True)
+
+    return result
+
+# ================================================================
+# Re-run Step 3 explicitly to create oba2_result
+# ================================================================
+
+# （测试阶段，仍使用手动触发）
+oba2.triggered_independent = True
+
+# 使用与 OBA1 相同的 stimulus
+oba2_result = run_oba2_independent_audio(
+    waveform=F_multi_complex,                 # 或你选择的任何 stimulus
+    oba2_observer=oba2,
+    oba2_pipeline_fn=run_energy_pipeline_audio_v17,
+    receptor_sens=receptor_sens,
+    cluster_map=cluster_map,
+    sample_rate=sample_rate
+)
+
+print("oba2_result keys:", oba2_result.keys())
+print("OBA2 independent run completed.")
+
+oba2_result keys: dict_keys(['BR', 'WA', 'Tone', 'Noise', 'Energy', 'F_vals', 'stop_t', 'harm_seq', 'mod_depth_seq', 'mod_complex_seq', 'tone_seq', 'noise_seq', 'frames'])
+OBA2 independent run completed.
+
+# ================================================================
+# Sound Tuner Twin — Step 4
+# Compare Manifold STRUCTURE (Not Alignment)
+# ================================================================
+
+def build_manifold_from_result(result_dict):
+    """
+    Reuse v1.8 manifold construction logic.
+    Returns:
+        X : (T, 8) array
+    """
+    X = np.column_stack([
+        result_dict["harm_seq"],
+        result_dict["mod_depth_seq"],
+        result_dict["mod_complex_seq"],
+        result_dict["BR"],
+        result_dict["WA"],
+        result_dict["Tone"],
+        result_dict["Noise"],
+        result_dict["Energy"],
+    ])
+    return X
+
+
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+
+
+def plot_pca(title, X):
+    pca = PCA(n_components=2)
+    Xp = pca.fit_transform(X)
+
+    plt.figure(figsize=(5, 5))
+    plt.plot(Xp[:, 0], Xp[:, 1], '-o', alpha=0.7)
+    plt.title(title)
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    plt.tight_layout()
+    plt.show()
+
+    return pca.explained_variance_ratio_
+
+
+# -------- Build manifolds --------
+
+X_oba1 = build_manifold_from_result(result)          # OBA1 result from Step 2
+X_oba2 = build_manifold_from_result(oba2_result)    # OBA2 independent result
+
+# -------- Plot separately --------
+
+var1 = plot_pca("OBA1 Manifold (while active)", X_oba1)
+var2 = plot_pca("OBA2 Manifold (independent)", X_oba2)
+
+print("OBA1 PCA variance:", var1)
+print("OBA2 PCA variance:", var2)
+
+
+
+OBA1 PCA variance: [0.9425284  0.05704817]
+OBA2 PCA variance: [0.94360984 0.05597175]
+
+memory_entry = {
+    "cluster_act": ...,
+    "Energy": ...,
+    "Tone": ...,
+    "Noise": ...
+}
+
+# ================================================================
+# Step 5.2 — Energy-labeled Manifold Slice (Post-hoc only)
+# ================================================================
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+
+# --- Build OBA2 manifold (same as Step 4, no change) ---
+X_oba2 = build_manifold_from_result(oba2_result)
+energy = np.array(oba2_result["Energy"])
+
+# --- Energy quantile bins (low / mid / high) ---
+q_low, q_high = np.quantile(energy, [0.3, 0.7])
+
+labels = np.zeros_like(energy, dtype=int)
+labels[energy <= q_low] = 0          # low energy
+labels[(energy > q_low) & (energy < q_high)] = 1  # mid energy
+labels[energy >= q_high] = 2          # high energy
+
+colors = np.array(["tab:blue", "tab:gray", "tab:red"])
+names  = ["Low-E", "Mid-E", "High-E"]
+
+# --- PCA (same projection for all points) ---
+pca = PCA(n_components=2)
+Xp = pca.fit_transform(X_oba2)
+
+# --- Plot with energy coloring ---
+plt.figure(figsize=(6, 6))
+for k in [0, 1, 2]:
+    idx = labels == k
+    plt.scatter(Xp[idx, 0], Xp[idx, 1],
+                s=30, alpha=0.7,
+                color=colors[k], label=names[k])
+
+plt.title("OBA2 Manifold — Post-hoc Energy Slice")
+plt.xlabel("PC1")
+plt.ylabel("PC2")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+print("Energy quantiles:", q_low, q_high)
+print("Counts (low, mid, high):",
+      [(labels == i).sum() for i in range(3)])
+
+
+Energy quantiles: 0.0 0.0
+Counts (low, mid, high): [np.int64(0), np.int64(0), np.int64(99)]
